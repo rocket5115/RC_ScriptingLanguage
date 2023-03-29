@@ -2,14 +2,11 @@ local list = [[
 #DEFINE $PL
 #DEFINE $ANIM
 #DEFINE $PEDS
-
 #VAR $three 3
-
 #FUNC $PL->coords->*=$ret
 #PRINT $ret
 #RETURN $ret
 #ENDFUNC
-
 #EXEC $PL->coords->$three->*=$ret
 #PRINT $ret
 ]]
@@ -105,7 +102,6 @@ local function AddToMethod(class,method,cmd,arg)
 end
 
 local function RegisterMethodReturn(class,method,arg)
-    print(class,method,arg,'return')
     if classes[class]and classes[class][method]then
         classes[class][method].retval=arg
     end
@@ -123,7 +119,6 @@ local function GetValue(arg,class,method)
             return GetValue(methodsVariables[class][method][arg])
         end
     end
-    print(arg)
     return Values[arg]or ConstValues[arg]
 end
 
@@ -141,7 +136,6 @@ local function IsParam(class,method)
 end
 
 local function SetValue(arg,value)
-    print(arg,value,'Set')
     Values[arg]=value
 end
 
@@ -151,6 +145,21 @@ local function SetConstValue(arg,value)
     else
         print('[WARNING] VARIABLE '..arg..' IS CONSTANT')
     end
+end
+
+local function EvaluateExpression(arg,method)
+    if arg and method then
+        if GetValue(arg)==GetValue(method)then
+            return true
+        else
+            return false
+        end
+    else
+        if arg then
+            return GetValue(arg)~="false"   
+        end
+    end
+    return false
 end
 
 local function GetArg(arg,num)
@@ -275,6 +284,8 @@ end
 local AwaitFunctionEnd = false
 local LastMethod = nil
 
+local AwaitLoopEnd = false
+
 local functions = {
     ['#DEFINE'] = function(args)
         local var = IsVar(args[1])
@@ -303,10 +314,8 @@ local functions = {
         return args~=false
     end,
     ['#ENDFUNC'] = function(args)
-        if AwaitFunctionEnd then
-            AwaitFunctionEnd=false
-            LastMethod=nil
-        end
+        AwaitFunctionEnd=false
+        LastMethod=nil
         return not AwaitFunctionEnd
     end,
     ['#RETURN'] = function(args,class,method)
@@ -335,11 +344,23 @@ local functions = {
         for i=1,#args do
             res=res..GetValue(args[i],class,method)..(i~=#args and " "or"")
         end
-        --print(res)
+        print(res)
+        return true
     end,
     ['#CONST'] = function(args)
         local var,value = GetVar(args[1],1),args[2]
         SetConstValue(var,value)
+    end,
+    ['#WHILE'] = function(args)
+        local var,method = GetVar(args[1],1),GetMethod(args[1],1)
+        local expr = EvaluateExpression(var,method)
+        print(expr)
+        AwaitLoopEnd=true
+        return true
+    end,
+    ['#ENDWHILE'] = function(args)
+        AwaitLoopEnd=false
+        return not AwaitLoopEnd
     end
 }
 
@@ -347,6 +368,7 @@ function ExecuteClassMethod(class,method,param)
     local methods = GetClassMethod(class,method)
     if methods then
         if param then
+            SetValue(methods.variable,GetValue(param))
             RegisterMethodVariable(class,method,methods.variable,param)
         end
         for i=1,#methods do
@@ -355,7 +377,6 @@ function ExecuteClassMethod(class,method,param)
             end
         end
         local method = GetMethodReturn(class,method)
-        print(method)
         return method
     else
         return false
@@ -366,14 +387,16 @@ for i=1,#answers do
     if AwaitFunctionEnd and answers[i].command~='#ENDFUNC' then
         AddToMethod(LastMethod.class,LastMethod.method,answers[i].command,answers[i].data)
     else
-        if functions[answers[i].command]then
-            if functions[answers[i].command](answers[i].data) then
-                --print('Command: '..answers[i].command..' Loaded')
-            else
-                --print('Command: '..answers[i].command..' Failed To Load')
+        if AwaitLoopEnd and answers[i].command~="#ENDWHILE" then
+
+        else
+            if functions[answers[i].command]then
+                if functions[answers[i].command](answers[i].data) then
+                    --print('Command: '..answers[i].command..' Loaded')
+                else
+                    print('Command: '..answers[i].command..' Failed To Load')
+                end
             end
         end
     end
 end
-
---Do Naprawy - Brak Wczytywania wartości zwrotniej Funkcji
