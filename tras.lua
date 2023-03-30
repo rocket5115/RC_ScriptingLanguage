@@ -1,14 +1,20 @@
 local list = [[
 #DEFINE $PL
-#DEFINE $ANIM
-#DEFINE $PEDS
+
 #VAR $three 3
+
 #FUNC $PL->coords->*=$ret
-#PRINT $ret
 #RETURN $ret
 #ENDFUNC
-#EXEC $PL->coords->$three->*=$ret
+
+#FUNC $PL->all->*=$ret
 #PRINT $ret
+#VAR $test $ret
+#RETURN $three test
+#ENDFUNC
+
+#EXEC $PL->all->$three
+#PRINT $test
 ]]
 local ForbiddenLetters = {
     ['\n']=true,
@@ -116,7 +122,7 @@ end
 local function GetValue(arg,class,method)
     if class and method then
         if methodsVariables[class] and methodsVariables[class][method] and methodsVariables[class][method][arg]then
-            return GetValue(methodsVariables[class][method][arg])
+            return GetValue(methodsVariables[class][method][arg]or arg)
         end
     end
     return Values[arg]or ConstValues[arg]
@@ -124,7 +130,7 @@ end
 
 local function GetMethodReturn(class,method)
     if classes[class]and classes[class][method]then
-        return GetValue(classes[class][method].retval)
+        return GetValue(classes[class][method].retval,class,method)
     end
     return nil
 end
@@ -135,8 +141,27 @@ local function IsParam(class,method)
     end
 end
 
-local function SetValue(arg,value)
-    Values[arg]=value
+local function GetValueDefinition(value,class,method)
+    local substr = value:sub(1,1)
+    if substr=='$'then
+        return (GetValue(value,class,method)or GetValue(value))or((class and method)and methodsVariables[class][method][value])
+    elseif substr=='%'then
+        return load("return "..value:sub(2,value:len()))()
+    else
+        return value
+    end
+end
+
+local function SetValue(arg,value,class,method,override)
+    if class and method then
+        if methodsVariables[class]and methodsVariables[class][method]and not override then
+            methodsVariables[class][method][arg]=GetValueDefinition(value,class,method)or GetValueDefinition(value)
+        else
+            Values[arg]=GetValueDefinition(value,class,method)
+        end
+    else
+        Values[arg]=GetValueDefinition(value,class,method)
+    end
 end
 
 local function SetConstValue(arg,value)
@@ -326,9 +351,9 @@ local functions = {
         end
         return false
     end,
-    ['#VAR'] = function(args)
+    ['#VAR'] = function(args,class,method)
         local p1,p2 = GetVar(args[1],1),args[2]
-        SetValue(p1,p2)
+        SetValue(p1,p2,class,method,true)
         return (p1 and p2)
     end,
     ['#EXEC'] = function(args)
@@ -354,7 +379,6 @@ local functions = {
     ['#WHILE'] = function(args)
         local var,method = GetVar(args[1],1),GetMethod(args[1],1)
         local expr = EvaluateExpression(var,method)
-        print(expr)
         AwaitLoopEnd=true
         return true
     end,
@@ -368,7 +392,7 @@ function ExecuteClassMethod(class,method,param)
     local methods = GetClassMethod(class,method)
     if methods then
         if param then
-            SetValue(methods.variable,GetValue(param))
+            SetValue(methods.variable,GetValue(param),class,method)
             RegisterMethodVariable(class,method,methods.variable,param)
         end
         for i=1,#methods do
@@ -384,17 +408,18 @@ function ExecuteClassMethod(class,method,param)
 end
 
 for i=1,#answers do
-    if AwaitFunctionEnd and answers[i].command~='#ENDFUNC' then
-        AddToMethod(LastMethod.class,LastMethod.method,answers[i].command,answers[i].data)
+    local cmd = answers[i].command:upper()
+    if AwaitFunctionEnd and cmd~='#ENDFUNC' then
+        AddToMethod(LastMethod.class,LastMethod.method,cmd,answers[i].data)
     else
-        if AwaitLoopEnd and answers[i].command~="#ENDWHILE" then
+        if AwaitLoopEnd and cmd~="#ENDWHILE" then
 
         else
-            if functions[answers[i].command]then
-                if functions[answers[i].command](answers[i].data) then
-                    --print('Command: '..answers[i].command..' Loaded')
+            if functions[cmd]then
+                if functions[cmd](answers[i].data) then
+                    --print('Command: '..cmd..' Loaded')
                 else
-                    print('Command: '..answers[i].command..' Failed To Load')
+                    print('Command: '..cmd..' Failed To Load')
                 end
             end
         end
